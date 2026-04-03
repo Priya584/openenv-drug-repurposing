@@ -1,0 +1,129 @@
+spec_version: 1
+name: drug
+type: space
+runtime: fastapi
+app: server.app:app
+port: 8000
+
+description: >
+  A biomedical RL environment where an AI agent navigates a drug-disease
+  knowledge graph to discover FDA-approved drugs that could be repurposed
+  for new diseases. The agent explores protein targets, biological pathways,
+  and drug nodes, earning shaped rewards for novel exploration and a final
+  score for the quality of its repurposing proposal.
+
+tasks:
+  - name: explore
+    description: >
+      Visit at least 8 unique nodes in the knowledge graph starting from
+      a random drug node. Rewards novelty and relevance to the target disease.
+      The episode auto-terminates with a completion bonus once 8+ nodes are visited.
+    difficulty: easy
+    max_steps: 20
+    success_threshold: 0.3
+    baseline_score: 0.42
+    baseline_success: true
+    baseline_notes: >
+      Heuristic agent visits 8+ unique target/pathway nodes within ~10 steps,
+      triggering the completion bonus.
+
+  - name: find_target
+    description: >
+      Starting from a drug node, navigate to a protein target or pathway node
+      that is directly linked (1 hop) to the target disease within 15 steps.
+      A large bonus reward fires when the agent reaches a qualifying node.
+    difficulty: medium
+    max_steps: 15
+    success_threshold: 0.5
+    baseline_score: 0.48
+    baseline_success: false
+    baseline_notes: >
+      Heuristic agent finds a disease-linked target node in ~6 steps on average,
+      just below the 0.5 threshold without LLM-guided reasoning.
+
+  - name: repurpose
+    description: >
+      Explore the knowledge graph and propose a drug repurposing candidate for
+      the target disease. Graded on four dimensions: biological plausibility
+      (pathway overlap), novelty (not already an approved use), reasoning quality
+      (specificity of mechanistic explanation), and literature support.
+    difficulty: hard
+    max_steps: 20
+    success_threshold: 0.6
+    baseline_score: 0.38
+    baseline_success: false
+    baseline_notes: >
+      Heuristic agent proposes a drug with moderate pathway overlap but weak
+      reasoning quality. LLM agent with specific mechanistic reasoning scores ~0.55.
+
+observation_space:
+  type: object
+  fields:
+    - name: current_disease
+      type: string
+      description: MONDO or internal ID of the target disease.
+    - name: current_disease_name
+      type: string
+      description: Human-readable disease name.
+    - name: current_node_id
+      type: string
+      description: ID of the agent's current position in the knowledge graph.
+    - name: current_node_type
+      type: string
+      enum: [drug, target, pathway, disease]
+      description: Type of the current node.
+    - name: current_node_name
+      type: string
+      description: Human-readable name of the current node.
+    - name: available_actions
+      type: array
+      description: List of neighbour nodes reachable from the current node.
+    - name: visited_nodes
+      type: array
+      description: Ordered list of all node IDs visited this episode.
+    - name: candidate_drugs
+      type: array
+      description: >
+        Drugs encountered during exploration that are not already approved
+        for the target disease, with their pathway_overlap_score.
+    - name: last_action_result
+      type: string
+      description: Human-readable result of the previous action.
+    - name: exploration_score
+      type: float
+      description: Cumulative shaped reward accumulated so far this episode.
+    - name: steps_remaining
+      type: integer
+      description: Steps left before the episode is force-terminated.
+    - name: reward
+      type: float
+      description: Reward received from the last action.
+    - name: done
+      type: boolean
+      description: Whether the episode has terminated.
+
+action_space:
+  type: object
+  fields:
+    - name: action_type
+      type: string
+      enum:
+        - explore_drug
+        - explore_target
+        - explore_pathway
+        - explore_disease
+        - propose_repurposing
+      description: >
+        explore_* moves the agent to a neighbour of the given type.
+        propose_repurposing submits a final candidate and ends the episode.
+    - name: node_id
+      type: string
+      description: >
+        Must be an exact node ID present in available_actions (for explore_*)
+        or in candidate_drugs (for propose_repurposing).
+    - name: reasoning
+      type: string
+      description: >
+        Agent's explanation for the chosen action. For propose_repurposing,
+        quality is scored by the grader — must reference specific pathway IDs,
+        target gene symbols, and mechanistic justification.
