@@ -1,5 +1,5 @@
 spec_version: 1
-name: drug
+name: drug-repurposing
 type: space
 runtime: fastapi
 app: server.app:app
