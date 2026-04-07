@@ -12,6 +12,13 @@ from typing import Dict, List, Optional
 
 from openai import OpenAI
 
+# Scores must be strictly inside (0, 1) — never 0.0 or 1.0 exactly.
+_SCORE_EPS = 1e-4
+
+def _clamp_score(value: float) -> float:
+    """Clamp to open interval (_SCORE_EPS, 1 - _SCORE_EPS)."""
+    return max(_SCORE_EPS, min(1.0 - _SCORE_EPS, float(value)))
+
 # ── config ────────────────────────────────────────────────────────────
 BENCHMARK    = "drug-repurposing"
 # Submission Checklist Fix: Strict variable naming and default rules
@@ -101,7 +108,7 @@ SYSTEM_PROMPTS: Dict[str, str] = {
 
 
 def log_start(benchmark: str, task: str, model: str) -> None:
-    print(f"[START] benchmark={benchmark} task={task} model={model}", flush=True)
+    print(f"[START] env={benchmark} task={task} model={model}", flush=True)
 
 
 def log_step(step: int, action: str, reward: float, done: bool,
@@ -113,10 +120,11 @@ def log_step(step: int, action: str, reward: float, done: bool,
     )
 
 
-def log_end(success: bool, steps: int,
+def log_end(success: bool, steps: int, score: float,
             rewards: List[float]) -> None:
     print(
         f"[END] success={str(success).lower()} steps={steps} "
+        f"score={score:.4f} "
         f"rewards={','.join(f'{r:.2f}' for r in rewards)}",
         flush=True,
     )
@@ -276,7 +284,7 @@ def run_episode(client: OpenAI, task: str) -> None:
 
     rewards:     List[float] = []
     steps_taken: int         = 0
-    score:       float       = 0.0
+    score:       float       = _SCORE_EPS  # default to eps, never exactly 0.0
     success:     bool        = False
 
     log_start(benchmark=BENCHMARK, task=task, model=MODEL_NAME)
@@ -340,7 +348,7 @@ def run_episode(client: OpenAI, task: str) -> None:
 
                 result      = env.step(action)
                 obs         = result.observation
-                reward      = result.reward or 0.0
+                reward      = _clamp_score(result.reward or _SCORE_EPS)
                 done        = result.done
 
                 rewards.append(reward)
@@ -359,22 +367,22 @@ def run_episode(client: OpenAI, task: str) -> None:
             # FIX 3: use environment's own normalized score appropriately
             if task == "repurpose":
                 # For repurposing, the true grade is the LAST step's reward
-                score = rewards[-1] if rewards and done else 0.0
-                score = min(max(score, 0.0), 1.0)
+                score = rewards[-1] if rewards and done else _SCORE_EPS
+                score = _clamp_score(score)
             else:
-                # Normalize exploration cumulative scores by expected maximums
-                raw_score = float(getattr(obs, "exploration_score", sum(rewards)))
+                # Normalize exploration cumulative scores (including completion bonuses) by expected maximums
+                raw_score = sum(rewards)
                 max_expected = 4.0 if task == "explore" else 2.0
-                score = min(max(raw_score / max_expected, 0.0), 1.0)
+                score = _clamp_score(raw_score / max_expected)
                 
             success = score >= threshold
 
         except Exception as e:
-            pass
-            # print(f"[DEBUG] Episode error (task={task}): {e}", flush=True)
-            # import traceback; traceback.print_exc()
+            score = _SCORE_EPS  # ensure score is never exactly 0.0 on error
+            print(f"[DEBUG] Episode error (task={task}): {e}", flush=True)
+            import traceback; traceback.print_exc()
 
-    log_end(success=success, steps=steps_taken, rewards=rewards)
+    log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
 
 
 # ── main ──────────────────────────────────────────────────────────────

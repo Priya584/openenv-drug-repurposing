@@ -43,6 +43,15 @@ _BIOMEDICAL_KEYWORDS: frozenset[str] = frozenset(
 )
 
 
+# Epsilon used to ensure scores are strictly within (0, 1).
+_EPS = 1e-4
+
+
+def _clamp(value: float) -> float:
+    """Clamp a score to the open interval (_EPS, 1 - _EPS)."""
+    return max(_EPS, min(1.0 - _EPS, float(value)))
+
+
 class RepurposingGrader:
     """
     Grades the agent's final repurposing proposal.
@@ -73,11 +82,11 @@ class RepurposingGrader:
             if not disease_exists:
                 missing.append(f"disease '{target_disease_id}'")
             return {
-                "biological_plausibility": 0.0,
-                "novelty": 0.0,          # FIX 1: was "novelty_score" — now consistent
-                "reasoning_quality": 0.0,
-                "literature_support": 0.0,
-                "total_score": 0.0,
+                "biological_plausibility": _EPS,
+                "novelty": _EPS,
+                "reasoning_quality": _EPS,
+                "literature_support": _EPS,
+                "total_score": _EPS,
                 "feedback": f"Invalid proposal: unknown {', '.join(missing)}.",
             }
 
@@ -109,11 +118,11 @@ class RepurposingGrader:
             feedback_parts.append(f"Evidence note: {notes}")
 
         return {
-            "biological_plausibility": round(plausibility, 4),
-            "novelty": round(novelty, 4),          # FIX 1: was "novelty_score"
-            "reasoning_quality": round(reasoning_q, 4),
-            "literature_support": round(lit_support, 4),
-            "total_score": round(total, 4),
+            "biological_plausibility": round(_clamp(plausibility), 6),
+            "novelty": round(_clamp(novelty), 6),
+            "reasoning_quality": round(_clamp(reasoning_q), 6),
+            "literature_support": round(_clamp(lit_support), 6),
+            "total_score": round(_clamp(total), 6),
             "feedback": " | ".join(feedback_parts),
         }
 
@@ -127,12 +136,13 @@ class RepurposingGrader:
 
     def _score_novelty(self, drug_id: str, disease_id: str) -> float:
         """
-        1.0 if this is NOT already an approved use.
-        0.0 if it is already approved (agent should not rediscover known uses).
+        High score if this is NOT already an approved use.
+        Low score if it is already approved (agent should not rediscover known uses).
+        Values clamped to (0, 1) exclusive by the caller via _clamp().
         """
         if self.graph.is_approved(drug_id, disease_id):
-            return 0.0
-        return 1.0
+            return 0.05  # already approved — low but not 0.0
+        return 0.95  # novel repurposing — high but not 1.0
 
     def _score_reasoning(self, reasoning: str) -> float:
         """
@@ -142,17 +152,17 @@ class RepurposingGrader:
         - Penalty: generic/hedging phrases with zero specific terms
         """
         if not reasoning or len(reasoning.strip()) < 10:
-            return 0.0
+            return 0.02  # very poor reasoning — small but not 0.0
 
         text = reasoning.lower()
 
         # Base: length score capped at 200 chars
-        length_score = min(1.0, len(text) / 200.0)
+        length_score = min(0.99, len(text) / 200.0)
 
         # FIX 3: _BIOMEDICAL_KEYWORDS is already lowercased frozenset — no per-call work
         keywords_found = sum(1 for kw in _BIOMEDICAL_KEYWORDS if kw in text)
         # Normalize: 5+ distinct biomedical terms = full keyword score
-        keyword_score = min(1.0, keywords_found / 5.0)
+        keyword_score = min(0.99, keywords_found / 5.0)
 
         score = 0.5 * length_score + 0.5 * keyword_score
 
@@ -161,7 +171,7 @@ class RepurposingGrader:
         if keywords_found == 0 and any(phrase in text for phrase in generic_phrases):
             score *= 0.5
 
-        return round(min(1.0, score), 4)
+        return round(min(0.99, max(0.01, score)), 4)
 
     def _score_literature_support(self, drug_id: str, disease_id: str) -> float:
         """
@@ -182,4 +192,4 @@ class RepurposingGrader:
             return 0.20
         elif overlap > 0.0:
             return 0.10
-        return 0.0
+        return 0.05  # no connection — small but not 0.0

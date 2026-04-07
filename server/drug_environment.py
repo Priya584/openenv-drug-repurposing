@@ -32,6 +32,13 @@ TASK_CONFIGS = {
     "repurpose": {"max_steps": 20, "success_threshold": 0.6},
 }
 
+# Scores must be strictly inside (0, 1) — never 0.0 or 1.0 exactly.
+_SCORE_EPS = 1e-4
+
+def _clamp_reward(value: float) -> float:
+    """Clamp a reward/score to the open interval (_SCORE_EPS, 1 - _SCORE_EPS)."""
+    return max(_SCORE_EPS, min(1.0 - _SCORE_EPS, float(value)))
+
 class DrugEnvironment(Environment):
     """
     Drug Repurposing RL Environment.
@@ -130,7 +137,7 @@ class DrugEnvironment(Environment):
         if self.task == "explore" and len(self.visited_nodes) >= 8:
             obs = self._build_observation(
                 last_action_result=obs.last_action_result + " [TASK COMPLETE: explored 8+ nodes]",
-                reward=obs.reward + 0.5,  # bonus
+                reward=obs.reward + 0.5,
                 done=True,
             )
         elif self.task == "find_target":

@@ -148,15 +148,22 @@ class DrugKnowledgeGraph:
         """Check if a drug is already approved for a disease."""
         return (drug_id, disease_id) in self._approved_pairs
 
+    # Epsilon for clamping scores to the open interval (0, 1)
+    _SCORE_EPS = 1e-4
+
+    def _clamp_score(self, value: float) -> float:
+        """Clamp a score to the open interval (_SCORE_EPS, 1 - _SCORE_EPS)."""
+        return max(self._SCORE_EPS, min(1.0 - self._SCORE_EPS, float(value)))
+
     def compute_pathway_overlap(self, drug_id: str, disease_id: str) -> float:
         """
         Core scoring function: fraction of disease-linked pathways reachable
         from the drug via its targets.
 
-        Returns a normalized 0-1 score.
+        Returns a score strictly within (0, 1) — never exactly 0.0 or 1.0.
         """
         if drug_id not in self.G or disease_id not in self.G:
-            return 0.0
+            return self._SCORE_EPS
 
         # Pathways linked to the disease
         disease_pathways: set[str] = set()
@@ -165,7 +172,7 @@ class DrugKnowledgeGraph:
                 disease_pathways.add(pred)
 
         if not disease_pathways:
-            return 0.0
+            return self._SCORE_EPS
 
         # Pathways reachable from drug via its targets
         drug_pathways: set[str] = set()
@@ -177,7 +184,7 @@ class DrugKnowledgeGraph:
                     drug_pathways.add(pathway)
 
         if not drug_pathways:
-            return 0.0
+            return self._SCORE_EPS
 
         overlap = drug_pathways & disease_pathways
         # Weighted overlap using edge scores
@@ -196,7 +203,8 @@ class DrugKnowledgeGraph:
             weighted_overlap += (tp_weight + pd_weight) / 2.0
 
         max_possible = len(disease_pathways)
-        return min(1.0, weighted_overlap / max_possible)
+        raw = weighted_overlap / max_possible
+        return self._clamp_score(raw)
 
     def find_repurposing_candidates(
         self, disease_id: str, exclude_known: bool = True

@@ -12,6 +12,14 @@ from typing import Any, Dict, List
 class RewardCalculator:
     """Step-by-step reward shaping to guide agent graph exploration."""
 
+    # Scores must be strictly inside (0, 1) — never 0.0 or 1.0.
+    _EPS = 1e-4
+
+    @staticmethod
+    def _clamp(value: float) -> float:
+        """Clamp to open interval (eps, 1 - eps)."""
+        return max(RewardCalculator._EPS, min(1.0 - RewardCalculator._EPS, float(value)))
+
     # Reward component values
     NOVELTY_BONUS = 0.30        # Visiting a new node
     RELEVANCE_BONUS = 0.50      # Node is connected to the target disease
@@ -91,10 +99,9 @@ class RewardCalculator:
           - Reasoning quality:       20%
           - Literature support:      20%
         """
-        return round(
+        return round(self._clamp(
             grade_result["biological_plausibility"] * 0.35 +
             grade_result["novelty"] * 0.25 +
             grade_result["reasoning_quality"] * 0.20 +
-            grade_result["literature_support"] * 0.20,
-            4,
-        )
+            grade_result["literature_support"] * 0.20
+        ), 4)
